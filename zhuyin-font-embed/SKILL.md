@@ -43,10 +43,13 @@ pip install fonttools brotli lxml
 - **Word 檔**：用 `docx` 指令（見下方）。
 
 ```bash
-python zhuyin.py html 學習單.html            # → 學習單_注音.html
-python zhuyin.py text 課文.txt               # → 課文_注音.html
+python zhuyin.py html 學習單.html --pdf      # → 學習單_注音.html ＋ 學習單_注音.pdf
+python zhuyin.py text 課文.txt --pdf         # → 課文_注音.html ＋ .pdf
+python zhuyin.py docx 學習單.docx            # → 學習單_注音.docx
 python zhuyin.py html 學習單.html --font huninn -o 學習單_粉圓.html
 ```
+
+老師要 PDF 就加 `--pdf`；之後每次 `fix`，PDF 會跟著自動更新。
 
 每次會產出三個附屬檔：
 
@@ -54,7 +57,7 @@ python zhuyin.py html 學習單.html --font huninn -o 學習單_粉圓.html
 - `*_破音字報告.json`：同內容的 JSON。
 - `*_破音字校對.html`：給老師用的校對頁。
 
-### 步驟二：AI 判斷破音字（一定要做，不要跳過）
+### 步驟二：AI 判斷破音字（網頁、PDF、Word 都一定要做，不要跳過）
 
 讀 `*_破音字報告.md`：
 
@@ -63,30 +66,31 @@ python zhuyin.py html 學習單.html --font huninn -o 學習單_粉圓.html
 3. 用 `fix` 一次改完（id 用逗號連接表示同一個讀音，-1 = 這個字不標注音）：
 
 ```bash
-python zhuyin.py fix 學習單_注音.html --set "12,30,41=1 57=2 88=-1"
+python zhuyin.py fix 學習單_注音.html --set "12,30,41=1 57=2 88=-1"   # 網頁（PDF 一起更新）
+python zhuyin.py docx 學習單_注音.docx --set "8=1 20=0"               # Word：直接修正已輸出的檔案
 ```
 
-`fix` 會更新網頁、報告、校對頁。改完再看一次報告確認。
+`fix` 會更新網頁、PDF、報告、校對頁；Word 會更新 .docx、報告、校對頁。改完再看一次報告確認。
 
 查某字有哪些讀音：`python zhuyin.py readings 長行和`
 
 ### 步驟三：交付
 
-交付成品網頁與校對頁，回覆老師時簡短說明：
+交付成品（網頁／PDF／Word）與校對頁，回覆老師時簡短說明：
 
 - 用了哪套字型、檔案多大。
 - 破音字共幾個，AI 改了哪些（列幾個代表例子即可）。
 - 仍拿不準的字（若有）列出來，請老師在校對頁確認。
-- 校對頁的用法：點有虛線的字選讀音，按「下載修正後網頁」取代原檔；或按「複製修正碼給 AI」把修正碼貼回來。
+- 校對頁的用法：點有虛線的字選讀音，按「下載修正後網頁」取代原檔；或按「複製修正碼給 AI」把修正碼貼回來。Word 的校對頁只有「複製修正碼」，貼回來後用 `docx --set` 修正。
 
-PDF：`python zhuyin.py pdf 學習單_注音.html`（用 Edge／Chrome 無頭模式列印，字型會內嵌）。也可以請老師直接用瀏覽器開網頁 → 列印 → 另存為 PDF。
+PDF 用 Edge／Chrome 無頭模式列印，字型會內嵌。單獨轉檔：`python zhuyin.py pdf 學習單_注音.html`。
 
 ## 老師要改讀音時
 
 | 老師的說法 | 做法 |
 |---|---|
 | 「第 3 題的『長』要唸ㄓㄤˇ」 | 在報告找到對應 id，`fix --set id=讀音編號`，只改那個字 |
-| 貼回「破音字修正碼：12=2 30=1」 | `fix --set "12=2 30=1"` |
+| 貼回「破音字修正碼：12=2 30=1」 | 網頁／PDF：`fix --set "12=2 30=1"`；Word：`docx 成品_注音.docx --set "12=2 30=1"` |
 | 用 bpmfvs／toneoz 改好後貼回文字 | 文字存成 .txt，`python zhuyin.py merge 成品.html 修正文字.txt` |
 | 想自己用 bpmfvs 改 | `python zhuyin.py export 成品.html` 產出純文字，請老師貼到 https://buttaiwan.github.io/bpmfvs/ |
 | 「換成粉圓注音」 | `python zhuyin.py html 成品.html --font huninn -o 新檔.html`（已改好的讀音保留） |
@@ -97,14 +101,15 @@ PDF：`python zhuyin.py pdf 學習單_注音.html`（用 Edge／Chrome 無頭模
 ## Word
 
 ```bash
-python zhuyin.py docx 學習單.docx            # → 學習單_注音.docx
-python zhuyin.py docx 學習單.docx --set "5=1"  # 依報告 id 修正（從原始 Word 重新產生）
+python zhuyin.py docx 學習單.docx                 # → 學習單_注音.docx、報告、校對頁
+python zhuyin.py docx 學習單_注音.docx --set "5=1" # 依報告 id 修正（直接改已輸出的檔案）
 ```
 
 - 會把有中文的文字改成注音字型、插入破音字選擇符，並把字型（只含用到的字）內嵌進 .docx。
 - 對方用 Windows／Mac 版 Word 開啟即可看到注音。Google 文件、手機 Word App 不支援內嵌字型，會看不到注音。
 - 老師在 Word 裡新打的字若不在內嵌範圍，會顯示成其他字型；請老師安裝字型（Google Fonts 搜尋 Bpmf Zihi Kai Std）或重跑一次。
-- Word 的步驟二同樣要做：讀報告、判斷、用 `--set` 從原始 Word 重新產生。
+- Word 的步驟二同樣要做：讀報告、判斷、用 `--set` 修正。
+- 開啟時若出現「受保護的檢視」，要按「啟用編輯」，Word 才會載入內嵌字型。
 
 ## 網頁裡用程式產生的文字（互動遊戲、動畫）
 

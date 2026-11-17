@@ -569,7 +569,7 @@ body.onlyn .blk:not(.hasn){display:none}
 <header><h1>破音字校對</h1>
 <button id="dl">下載修正後網頁</button><button id="cp">複製文字（可貼到 bpmfvs）</button><button id="code">複製修正碼給 AI</button><span id="msg"></span></header>
 <div class="legend">點有虛線的字就能選讀音。<span style="background:#fff3b0">黃底</span>需要確認（<b id="cnt"></b> 個）
-<span style="background:#e3f4e7">綠底</span>已依詞語判斷 <span style="background:#cfe3ff">藍底</span>你改過的，沒底色的是常用預設讀音。改完按「下載修正後網頁」，用下載的檔案取代原檔即可。
+<span style="background:#e3f4e7">綠底</span>已依詞語判斷 <span style="background:#cfe3ff">藍底</span>你改過的，沒底色的是常用預設讀音。<span id="tip">改完按「下載修正後網頁」，用下載的檔案取代原檔即可。</span>
 <label style="margin-left:8px"><input type="checkbox" onchange="document.body.classList.toggle('onlyn',this.checked)"> 只看需要確認的段落</label></div>
 <main id="m"></main><div id="pop"></div>
 <script>
@@ -596,6 +596,7 @@ function msg(t){document.getElementById('msg').textContent=t;}
 function fixed(){const bin=atob(SRC);const u8=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)u8[k]=bin.charCodeAt(k);
  let s=new TextDecoder().decode(u8);const idx=D.items.map((x,i)=>i).sort((a,b)=>D.items[b][0]-D.items[a][0]);
  idx.forEach(i=>{const [o,l]=D.items[i];if(cur[i]===orig[i])return;s=s.slice(0,o)+ch('',cur[i])+s.slice(o+l);});return s;}
+if(D.nodl){document.getElementById('dl').style.display='none';document.getElementById('tip').textContent='這是 Word 檔的校對頁：點字選好讀音後，按「複製修正碼給 AI」，把修正碼貼給 AI，就會產生修正後的 Word。';}
 document.getElementById('dl').onclick=()=>{const b=new Blob([fixed()],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=D.file;a.click();msg('已下載：'+D.file);};
 document.getElementById('cp').onclick=()=>{const t=[...m.querySelectorAll('.blk')].map(d=>d.textContent).join('\n');navigator.clipboard.writeText(t).then(()=>msg('已複製文字'));};
 document.getElementById('code').onclick=()=>{const c=D.items.map((x,i)=>cur[i]!==orig[i]?(i+1)+'='+cur[i]:null).filter(Boolean);
@@ -715,6 +716,7 @@ def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
     fam = zf.family
     zin = zipfile.ZipFile(inp)
     files = {n: zin.read(n) for n in zin.namelist()}
+    zin.close()
     parts = [n for n in files if re.match(r"word/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$", n)]
     alltext = []
     all_units = []
@@ -846,8 +848,10 @@ def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
             zo.writestr(n, files[n])
     base = os.path.splitext(outp)[0]
     need = write_report(base, all_units, items, zf, 0)
+    docx_proof(base, all_units, items, zf, py, "".join(alltext))
     out(f"完成：{outp}（字型 {FONTS[key][1]}，內嵌 {len(ttf)//1024} KB）")
     out(f"破音字 {len(items)} 個，需 AI 判斷 {len(need)} 個 → {base}_破音字報告.md")
+    out(f"校對頁：{base}_破音字校對.html")
     out("提醒：對方用 Windows / Mac 版 Word 開啟即可看到注音；Google 文件、手機 App 看不到內嵌字型。")
 
 
@@ -866,6 +870,41 @@ def find_browser():
         if p and os.path.exists(p):
             return p
     return None
+
+
+def docx_proof(base, units, items, zf, py, text):
+    blocks = [[]]
+    data = []
+    readings = {}
+    for u in units:
+        if u.get("tok") is None:
+            if blocks[-1]:
+                blocks.append([])
+            continue
+        c = u["c"]
+        if len(c) == 1 and py.is_poly(c) and zf.count(c) >= 2:
+            readings.setdefault(c, zf.readings(c))
+            blocks[-1].append([c, len(data)])
+            data.append([0, 0, u.get("vs") or 0])
+        else:
+            blocks[-1].append(c)
+    blocks = [b for b in blocks if b]
+    code = {"需判斷": "n", "規則": "r", "已指定": "r"}
+    ok = [code.get(it["status"], "d") for it in items] if len(items) == len(data) else ["d"] * len(data)
+    b64 = base64.b64encode(subset_font(zf.path, text, "woff2")).decode()
+    face = "@font-face{font-family:'ZY';src:url(data:font/woff2;base64,%s) format('woff2');font-display:block;}" % b64
+    page = PROOF_TMPL.replace("%FACE%", face).replace("%NAME%", htmlmod.escape(os.path.basename(base)))
+    page = page.replace("%DATA%", json.dumps({"blocks": blocks, "items": data, "readings": readings, "ok": ok,
+                                              "file": "", "nodl": True}, ensure_ascii=False)).replace("%SRC%", "")
+    with open(base + "_破音字校對.html", "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+def sync_pdf(html_path, want):
+    """要求輸出 PDF，或旁邊已有同名 PDF 時（例如 fix 之後），重新產生 PDF。"""
+    pdfp = os.path.splitext(html_path)[0] + ".pdf"
+    if want or os.path.exists(pdfp):
+        to_pdf(html_path, pdfp)
 
 
 def to_pdf(inp, outp):
@@ -922,6 +961,7 @@ def main():
     p.add_argument("--only", help="只讓這些區塊顯示注音（CSS 選擇器，例如 \".passage, .question\"）；預設整頁")
     p = sub.add_parser("text"); p.add_argument("input"); common(p); p.add_argument("--title")
     p.add_argument("--online", action="store_true", help="不內嵌，改從 Google Fonts 線上載入")
+    p.add_argument("--pdf", action="store_true", help="同時輸出 PDF（之後 fix 會自動更新 PDF）")
     p = sub.add_parser("fix"); p.add_argument("input"); common(p)
     p.add_argument("--set", action="append", help="id=讀音編號，可多個，例如 --set 12=2 --set 30=1 或 --set \"12=2 30=1\"")
     p = sub.add_parser("merge"); p.add_argument("input"); p.add_argument("textfile"); common(p)
@@ -956,7 +996,10 @@ def main():
         return
 
     if a.cmd == "docx":
-        o = a.output or os.path.splitext(a.input)[0] + "_注音.docx"
+        if a.set and not a.output and "_注音" in os.path.basename(a.input):
+            o = a.input   # 對已輸出的 Word 直接修正
+        else:
+            o = a.output or os.path.splitext(a.input)[0] + "_注音.docx"
         docx_build(a.input, o, a.font or "zihi", a.font_file, parse_sets(a.set), a.sandhi)
         return
 
@@ -970,17 +1013,20 @@ def main():
         src = TEXT_TMPL.format(title=htmlmod.escape(title), body="\n".join(body))
         o = a.output or os.path.splitext(a.input)[0] + "_注音.html"
         build_html(src, o, a.font or "zihi", a.font_file, sandhi=a.sandhi, online=a.online or None)
+        sync_pdf(o, a.pdf)
         return
 
     src = read_text(a.input)
     if a.cmd == "html":
         o = a.output or os.path.splitext(a.input)[0] + "_注音.html"
         build_html(src, o, a.font or "zihi", a.font_file, toggle=not a.no_toggle, auto=not a.no_auto, sandhi=a.sandhi, only=a.only, online=a.online or None)
+        sync_pdf(o, a.pdf)
     elif a.cmd == "fix":
         key = a.font or detect_key(src)
         o = a.output or a.input
         toggle = MARK_BTN[0] in src
         build_html(src, o, key, a.font_file, toggle=toggle, fixes=parse_sets(a.set))
+        sync_pdf(o, False)
     elif a.cmd == "merge":
         key = a.font or detect_key(src)
         src0 = strip_marked(strip_marked(src, MARK_CSS), MARK_BTN)
@@ -1008,6 +1054,7 @@ def main():
         tu = [u for u in units if u.get("tok") is not None]
         lk = {n for n, u in enumerate(tu) if u.get("lock")}
         build_html(body, o, key, a.font_file, toggle=MARK_BTN[0] in src, extra_lock=lk)
+        sync_pdf(o, False)
         out(f"已回填 {changed} 處讀音（對齊比例 {sm.ratio():.0%}）")
 
 
