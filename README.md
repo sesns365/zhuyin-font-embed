@@ -55,7 +55,7 @@
 |---|---|---|
 | HTML 網頁、學習單、互動遊戲 | 看得到 | 字型內嵌，可離線 |
 | PDF | 看得到 | 用 Edge／Chrome 列印，字型內嵌 |
-| Word（.docx） | Windows、Mac 版 Word 看得到 | Google 文件、手機 App 看不到內嵌字型 |
+| Word（.docx） | Windows、Mac 版 Word 看得到 | 內嵌整套字型（約 10 MB）；Google 文件、手機 App 看不到內嵌字型 |
 | 線上模式（`--online`） | 要有網路 | 檔案最小，從 Google Fonts 載入 |
 
 ## 安裝方式
