@@ -148,7 +148,8 @@ def subset_font(path, text, flavor=None, for_word=False):
     from fontTools import subset
     cps = {ord(c) for c in text if ord(c) not in VS_ALL}
     cps |= set(range(0x20, 0x7F)) | set(range(VS_BASE, VS_BASE + 16))
-    cps |= {ord(c) for c in "，。、；：？！「」『』（）《》〈〉…—～．·"}
+    if not for_word:
+        cps |= {ord(c) for c in "，。、；：？！「」『』（）《》〈〉…—～．·"}
     opt = subset.Options()
     opt.layout_features = ["*"]
     opt.name_IDs = ["*"]
@@ -157,6 +158,9 @@ def subset_font(path, text, flavor=None, for_word=False):
     opt.drop_tables = []
     if flavor:
         opt.flavor = flavor
+    if for_word:
+        # Word 只接受保留原本字形編號的抽字字型（同 Word 自己內嵌時的做法）
+        opt.retain_gids = True
     f = TTFont(path)
     s = subset.Subsetter(opt)
     s.populate(unicodes=cps)
@@ -769,7 +773,9 @@ def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
             rf.set(q("hint"), "eastAsia")
         files[n] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     # 內嵌字型（混淆格式 .odttf）
-    ttf = subset_font(zf.path, "".join(alltext), for_word=True)
+    # Word（Windows）實測：抽字後的字型都不會被載入，只有整套字型可以，所以內嵌整套（約 10 MB）。
+    with open(zf.path, "rb") as fh:
+        ttf = fh.read()
     guid = str(uuid.uuid4()).upper()
     keyb = bytes.fromhex(guid.replace("-", ""))[::-1]
     data = bytearray(ttf)
@@ -822,7 +828,6 @@ def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
     em = etree.SubElement(fe, q("embedRegular"))
     em.set(q("id", R_NS), "rIdZy1")
     em.set(q("fontKey"), "{" + guid + "}")
-    em.set(q("subsetted"), "1")
     files[ftn] = etree.tostring(ft, xml_declaration=True, encoding="UTF-8", standalone=True)
     # settings: embedTrueTypeFonts
     sn = "word/settings.xml"

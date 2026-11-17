@@ -105,7 +105,7 @@ python zhuyin.py docx 學習單.docx                 # → 學習單_注音.docx
 python zhuyin.py docx 學習單_注音.docx --set "5=1" # 依報告 id 修正（直接改已輸出的檔案）
 ```
 
-- 會把有中文的文字改成注音字型、插入破音字選擇符，並把字型（只含用到的字）內嵌進 .docx。
+- 會把有中文的文字改成注音字型、插入破音字選擇符，並把**整套字型**內嵌進 .docx（Windows Word 實測不接受抽字後的字型）。檔案約 10 MB（粉圓注音約 5 MB）。老師自己的電腦建議直接安裝字型（Google Fonts 搜尋 Bpmf Zihi Kai Std）。
 - 對方用 Windows／Mac 版 Word 開啟即可看到注音。Google 文件、手機 Word App 不支援內嵌字型，會看不到注音。
 - 老師在 Word 裡新打的字若不在內嵌範圍，會顯示成其他字型；請老師安裝字型（Google Fonts 搜尋 Bpmf Zihi Kai Std）或重跑一次。
 - Word 的步驟二同樣要做：讀報告、判斷、用 `--set` 修正。
