@@ -143,7 +143,7 @@ class ZhuyinFont:
         return [self.reading(ch, j) for j in range(self.count(ch))]
 
 
-def subset_font(path, text, flavor=None, english_name_only=False):
+def subset_font(path, text, flavor=None, for_word=False):
     from fontTools.ttLib import TTFont
     from fontTools import subset
     cps = {ord(c) for c in text if ord(c) not in VS_ALL}
@@ -161,11 +161,10 @@ def subset_font(path, text, flavor=None, english_name_only=False):
     s = subset.Subsetter(opt)
     s.populate(unicodes=cps)
     s.subset(f)
-    if english_name_only:
-        # Word 會用作業系統語言的字型名稱比對（中文 Windows 看到「ㄅ字嗨注音標楷」），
-        # 只留英文名稱，確保 fontTable 的名稱一定對得上。
-        f["name"].names = [n for n in f["name"].names
-                           if not (n.platformID == 3 and n.langID != 0x409) and n.platformID != 1]
+    if for_word and f["OS/2"].version < 4:
+        # OS/2 第 3 版不該設 fsSelection 第 7～9 位元；Word 遇到會拒絕載入內嵌字型
+        # （2026-11-17 在 Windows Word 實測：清掉後注音就能顯示）。
+        f["OS/2"].fsSelection &= ~((1 << 7) | (1 << 8) | (1 << 9))
     if flavor:
         f.flavor = flavor
     b = io.BytesIO()
@@ -770,7 +769,7 @@ def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
             rf.set(q("hint"), "eastAsia")
         files[n] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     # 內嵌字型（混淆格式 .odttf）
-    ttf = subset_font(zf.path, "".join(alltext), english_name_only=True)
+    ttf = subset_font(zf.path, "".join(alltext), for_word=True)
     guid = str(uuid.uuid4()).upper()
     keyb = bytes.fromhex(guid.replace("-", ""))[::-1]
     data = bytearray(ttf)
