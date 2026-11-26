@@ -178,12 +178,18 @@ def subset_font(path, text, flavor=None, for_word=False):
 
 # ───────────────────────── 破音字判斷 ─────────────────────────
 
+NUM_CH = set("〇零一二三四五六七八九十百千萬億0123456789０１２３４５６７８９")
+ORD_AFTER = {"年級"}          # 一年級：序數
+ORD_AFTER1 = set("樓號")       # 一樓、一號
+
+
 class Poyin:
     """bpmfvs 詞庫（Apache 2.0）＋ 特工365補充詞庫。規則：'*' 代表該字，例如「*大」=長大；
     開頭 '!' 表示優先規則。比對時取最長的規則；一樣長時補充詞庫優先，再以右側詞語優先。"""
 
-    def __init__(self, sandhi=False):
+    def __init__(self, sandhi=True, zf=None):
         self.sandhi = sandhi
+        self.zf = zf
         with open(os.path.join(DATA, "poyin_db.json"), encoding="utf-8") as f:
             self.db = json.load(f)
         self.extra = {}
@@ -226,9 +232,10 @@ class Poyin:
             c = u["c"]
             if c not in self.db or u.get("vs") is not None or u.get("lock"):
                 continue
-            if c in "一不" and not self.sandhi:
-                u["src"] = "本調"
-                continue
+            if c in "一不":
+                if not self.sandhi:
+                    u["src"] = "本調"
+                continue   # 變調在下面 apply_sandhi 依後字聲調處理
             best = None
             for j, p, is_extra in self.rules(c):
                 strong = p.startswith("!")
@@ -252,6 +259,68 @@ class Poyin:
                 if pc == "*" and t.get("vs") is None and not t.get("lock"):
                     t["vs"] = j
                     t["src"] = f"{src}「{want}」"
+        if self.sandhi and self.zf:
+            self.apply_sandhi(units)
+
+    def _tone(self, u):
+        r = self.zf.reading(u["c"], u.get("vs") or 0) if u.get("vs", 0) != -1 else ""
+        if not r:
+            return 0
+        if r.startswith("˙"):
+            return 5
+        return {"ˊ": 2, "ˇ": 3, "ˋ": 4}.get(r[-1], 1)
+
+    def _rule0(self, units, i):
+        """bpmfvs「一」第 0 組（本調）規則：第一、統一、唯一、一月、星期一……"""
+        n = len(units)
+        for p in self.db["一"]["v"][0].split("/"):
+            if not p or "*" not in p:
+                continue
+            for pos in [k for k, ch in enumerate(p) if ch == "*"]:
+                st = i - pos
+                if st < 0 or st + len(p) > n:
+                    continue
+                if all((units[st + k]["c"] == "一") if ch == "*" else units[st + k]["c"] == ch for k, ch in enumerate(p)):
+                    return p.replace("*", "一")
+        return None
+
+    def apply_sandhi(self, units):
+        """「一」「不」變調（教育部規則）。由右往左處理，後字是一／不時先定好後字。
+        一：單獨、詞尾、序數、數字 → ㄧ；後接四聲 → ㄧˊ；後接一二三聲 → ㄧˋ。
+        不：後接四聲 → ㄅㄨˊ；其餘（含詞尾）→ ㄅㄨˋ。夾在中間（看一看、好不好）也依後字聲調標。"""
+        def han(c):
+            return len(c) == 1 and "\u3400" <= c <= "\u9fff"
+        n = len(units)
+        for i in range(n - 1, -1, -1):
+            u = units[i]
+            c = u["c"]
+            if c not in "一不" or u.get("vs") is not None or u.get("lock"):
+                continue
+            prev = units[i - 1]["c"] if i > 0 else ""
+            nxt = units[i + 1] if i + 1 < n else None
+            if nxt is None or not han(nxt["c"]):
+                u["vs"], u["src"] = 0, "變調規則：單獨／句尾，標本調"
+                continue
+            if c == "一":
+                nc = nxt["c"]
+                w = self._rule0(units, i)
+                if prev == "第" or w:
+                    u["vs"], u["src"] = 0, f"變調規則：序數／詞尾「{w or '第一'}」，標本調"
+                    continue
+                if prev in NUM_CH or nc in NUM_CH or "".join(x["c"] for x in units[i + 1:i + 3]) in ORD_AFTER or nc in ORD_AFTER1:
+                    u["vs"], u["src"] = 0, "變調規則：數字／序數，標本調"
+                    continue
+            t = self._tone(nxt)
+            if not t:
+                continue
+            four = t in (4, 5)
+            if c == "一":
+                u["vs"] = 1 if four else 2
+            else:
+                u["vs"] = 1 if four else 0
+            u["src"] = f"變調規則「{c}{nxt['c']}」：後字{'四' if t == 4 else '輕' if t == 5 else '一二三'[t - 1]}聲"
+            if prev == nxt["c"]:
+                u["src"] += "（口語讀輕聲，字型沒有輕聲注音，依後字聲調標）"
 
 
 # ───────────────────────── HTML 處理 ─────────────────────────
@@ -607,9 +676,9 @@ document.getElementById('code').onclick=()=>{const c=D.items.map((x,i)=>cur[i]!=
 </script></body></html>"""
 
 
-def build_html(src, out_path, key, font_file=None, toggle=True, fixes=None, auto=True, quiet=False, sandhi=False, extra_lock=None, only=None, online=None):
-    py = Poyin(sandhi)
+def build_html(src, out_path, key, font_file=None, toggle=True, fixes=None, auto=True, quiet=False, sandhi=True, extra_lock=None, only=None, online=None):
     zf = ZhuyinFont(font_path(key, font_file))
+    py = Poyin(sandhi, zf)
     if online is None:
         online = '<meta name="zhuyin-online" content="1">' in src
     if only is None:
@@ -712,10 +781,10 @@ def is_cjk(s):
     return any("\u2e80" <= c <= "\u9fff" or "\u3000" <= c <= "\u303f" or "\uff00" <= c <= "\uffef" for c in s)
 
 
-def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=False):
+def docx_build(inp, outp, key, font_file=None, fixes=None, sandhi=True):
     from lxml import etree
-    py = Poyin(sandhi)
     zf = ZhuyinFont(font_path(key, font_file))
+    py = Poyin(sandhi, zf)
     fam = zf.family
     zin = zipfile.ZipFile(inp)
     files = {n: zin.read(n) for n in zin.namelist()}
@@ -956,7 +1025,8 @@ def main():
             p.add_argument("-o", "--output")
         p.add_argument("--font", choices=FONTS.keys(), help="zihi 字嗨注音標楷（預設）、huninn 粉圓注音、iansui 芫荽注音")
         p.add_argument("--font-file", help="改用本機字型檔（離線時）")
-        p.add_argument("--sandhi", action="store_true", help="「一」「不」標變調（預設標本調，同國小課本）")
+        p.add_argument("--no-sandhi", action="store_true", help="「一」「不」一律標本調（預設依教育部規則標變調）")
+        p.add_argument("--sandhi", action="store_true", help=argparse.SUPPRESS)  # 舊參數，現在是預設
 
     p = sub.add_parser("html"); p.add_argument("input"); common(p)
     p.add_argument("--no-toggle", action="store_true", help="不加「注音開／關」按鈕")
@@ -1004,7 +1074,7 @@ def main():
             o = a.input   # 對已輸出的 Word 直接修正
         else:
             o = a.output or os.path.splitext(a.input)[0] + "_注音.docx"
-        docx_build(a.input, o, a.font or "zihi", a.font_file, parse_sets(a.set), a.sandhi)
+        docx_build(a.input, o, a.font or "zihi", a.font_file, parse_sets(a.set), not a.no_sandhi)
         return
 
     if a.cmd == "text":
@@ -1016,14 +1086,14 @@ def main():
         body += [f"<p>{htmlmod.escape(l)}</p>" for l in rest if l]
         src = TEXT_TMPL.format(title=htmlmod.escape(title), body="\n".join(body))
         o = a.output or os.path.splitext(a.input)[0] + "_注音.html"
-        build_html(src, o, a.font or "zihi", a.font_file, sandhi=a.sandhi, online=a.online or None)
+        build_html(src, o, a.font or "zihi", a.font_file, sandhi=not a.no_sandhi, online=a.online or None)
         sync_pdf(o, a.pdf)
         return
 
     src = read_text(a.input)
     if a.cmd == "html":
         o = a.output or os.path.splitext(a.input)[0] + "_注音.html"
-        build_html(src, o, a.font or "zihi", a.font_file, toggle=not a.no_toggle, auto=not a.no_auto, sandhi=a.sandhi, only=a.only, online=a.online or None)
+        build_html(src, o, a.font or "zihi", a.font_file, toggle=not a.no_toggle, auto=not a.no_auto, sandhi=not a.no_sandhi, only=a.only, online=a.online or None)
         sync_pdf(o, a.pdf)
     elif a.cmd == "fix":
         key = a.font or detect_key(src)
@@ -1035,7 +1105,7 @@ def main():
         key = a.font or detect_key(src)
         src0 = strip_marked(strip_marked(src, MARK_CSS), MARK_BTN)
         toks, units, _ = scan_html(src0)
-        Poyin(a.sandhi).auto(units)
+        Poyin(not a.no_sandhi, ZhuyinFont(font_path(key, a.font_file))).auto(units)
         pasted = split_units(read_text(a.textfile))
         A = [u["c"] for u in units if u.get("tok") is not None]
         Ai = [i for i, u in enumerate(units) if u.get("tok") is not None]
